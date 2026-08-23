@@ -1,0 +1,92 @@
+# syntax=docker/dockerfile:1.4
+# ============================================================
+# Crypto Intelligence Platform - Web (Next.js)
+# Multi-stage build:
+#   Stage 1 (deps):     Node 20-alpine, install dependencies
+#   Stage 2 (builder):  build Next.js standalone output
+#   Stage 3 (development): dev server with hot reload
+#   Stage 4 (production): minimal runtime with standalone output
+# ============================================================
+
+ARG NODE_VERSION=20
+
+# ------------------------------------------------------------
+# Stage 1: Dependencies
+# ------------------------------------------------------------
+FROM node:${NODE_VERSION}-alpine AS deps
+
+RUN apk add --no-cache libc6-compat
+
+WORKDIR /app
+
+COPY apps/web/package.json apps/web/package-lock.json* ./
+
+RUN npm ci --ignore-scripts
+
+# ------------------------------------------------------------
+# Stage 2: Builder
+# ------------------------------------------------------------
+FROM node:${NODE_VERSION}-alpine AS builder
+
+WORKDIR /app
+
+ENV NEXT_TELEMETRY_DISABLED=1
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY apps/web/ ./
+
+ARG NEXT_PUBLIC_API_URL=http://localhost:8000
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+
+RUN npm run build
+
+# ------------------------------------------------------------
+# Stage 3: Development image - hot reload
+# ------------------------------------------------------------
+FROM node:${NODE_VERSION}-alpine AS development
+
+RUN apk add --no-cache libc6-compat
+
+WORKDIR /app
+
+ENV NEXT_TELEMETRY_DISABLED=1 \
+    NODE_ENV=development
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY apps/web/ ./
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD wget -qO- http://localhost:3000/ >/dev/null 2>&1 || exit 1
+
+CMD ["npm", "run", "dev"]
+
+# ------------------------------------------------------------
+# Stage 4: Production runtime - standalone output, non-root
+# ------------------------------------------------------------
+FROM node:${NODE_VERSION}-alpine AS production
+
+RUN apk add --no-cache curl \
+    && addgroup --system --gid 1001 nodejs \
+    && adduser --system --uid 1001 nextjs
+
+WORKDIR /app
+
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=3000 \
+    HOSTNAME=0.0.0.0
+
+COPY --from=builder /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+
+USER nextjs
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+    CMD curl -f http://localhost:3000/ || exit 1
+
+CMD ["node", "server.js"]

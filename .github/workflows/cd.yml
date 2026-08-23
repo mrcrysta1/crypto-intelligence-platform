@@ -1,0 +1,366 @@
+# ============================================================
+# CD Pipeline — Crypto Intelligence Platform
+#
+# Triggers on pushes to main and version tags:
+#   1. Build + push images to GHCR (multi-arch ready)
+#   2. Create git tag / GitHub Release on main merges
+#   3. Generate provenance attestations
+#   4. Deploy placeholder (wire to your target platform)
+#   5. Post-deploy health check against live environment
+# ============================================================
+name: CD
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        default: staging
+        type: choice
+        options: [staging, production]
+
+concurrency:
+  group: cd-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.repository }}
+  NODE_VERSION: "20"
+  PYTHON_VERSION: "3.12"
+
+permissions:
+  contents: write        # create releases/tags
+  packages: write        # push to GHCR
+  id-token: write        # OIDC for keyless attestation/signing
+  attestations: write    # build provenance
+
+jobs:
+  # ------------------------------------------------------------
+  # Metadata — compute versions & tags shared by all jobs
+  # ------------------------------------------------------------
+  meta:
+    name: Compute Metadata
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      tag: ${{ steps.meta.outputs.tag }}
+      is_tag_build: ${{ steps.meta.outputs.is_tag_build }}
+      api_image: ${{ steps.meta.outputs.api_image }}
+      web_image: ${{ steps.meta.outputs.web_image }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - id: meta
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          # Lowercase the repo path for GHCR compatibility
+          REPO_LC=$(echo "${REPO}" | tr '[:upper:]' '[:lower:]')
+
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+            IS_TAG="true"
+            TAGS="${GITHUB_REF_NAME},${VERSION},latest"
+          else
+            VERSION="$(git describe --tags --always --dirty 2>/dev/null || echo "0.0.0-${GITHUB_SHA::7}")"
+            IS_TAG="false"
+            TAGS="main,sha-${GITHUB_SHA::7}"
+          fi
+
+          echo "version=${VERSION}"          >> "$GITHUB_OUTPUT"
+          echo "is_tag_build=${IS_TAG}"      >> "$GITHUB_OUTPUT"
+          echo "api_image=${REGISTRY}/${REPO_LC}/crypto-api"   >> "$GITHUB_OUTPUT"
+          echo "web_image=${REGISTRY}/${REPO_LC}/crypto-web"   >> "$GITHUB_OUTPUT"
+
+          # First tag in list is the primary
+          echo "tag=$(echo ${TAGS} | cut -d, -f1)" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "all_tags<<EOF"
+            echo "${TAGS}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+  # ------------------------------------------------------------
+  # Build & Push API image
+  # ------------------------------------------------------------
+  build-api:
+    name: Build API Image
+    runs-on: ubuntu-latest
+    needs: meta
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata (tags & labels)
+        id: imgmeta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ needs.meta.outputs.api_image }}
+          tags: |
+            type=raw,value=${{ needs.meta.outputs.tag }}
+            type=sha,prefix=sha-
+            type=semver,pattern={{version}},enable=${{ needs.meta.outputs.is_tag_build == 'true' }}
+
+      - name: Build & push
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          target: runtime
+          push: true
+          tags: ${{ steps.imgmeta.outputs.tags }}
+          labels: ${{ steps.imgmeta.outputs.labels }}
+          cache-from: type=gha,scope=api-prod
+          cache-to: type=gha,mode=max,scope=api-prod
+          build-args: |
+            PYTHON_VERSION=${{ env.PYTHON_VERSION }}
+
+      - name: Generate provenance attestation
+        uses: actions/attest-build-provenance@v1
+        continue-on-error: true
+        with:
+          subject-name: ${{ needs.meta.outputs.api_image }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+  # ------------------------------------------------------------
+  # Build & Push Web image
+  # ------------------------------------------------------------
+  build-web:
+    name: Build Web Image
+    runs-on: ubuntu-latest
+    needs: meta
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata (tags & labels)
+        id: imgmeta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ needs.meta.outputs.web_image }}
+          tags: |
+            type=raw,value=${{ needs.meta.outputs.tag }}
+            type=sha,prefix=sha-
+            type=semver,pattern={{version}},enable=${{ needs.meta.outputs.is_tag_build == 'true' }}
+
+      - name: Build & push
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          target: production
+          push: true
+          tags: ${{ steps.imgmeta.outputs.tags }}
+          labels: ${{ steps.imgmeta.outputs.labels }}
+          cache-from: type=gha,scope=web-prod
+          cache-to: type=gha,mode=max,scope=web-prod
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ vars.PUBLIC_API_URL || 'https://api.example.com' }}
+
+      - name: Generate provenance attestation
+        uses: actions/attest-build-provenance@v1
+        continue-on-error: true
+        with:
+          subject-name: ${{ needs.meta.outputs.web_image }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+  # ------------------------------------------------------------
+  # Tag release on main merges (not tag builds themselves)
+  # ------------------------------------------------------------
+  release:
+    name: Tag & Release
+    runs-on: ubuntu-latest
+    needs: [meta, build-api, build-web]
+    if: github.ref == 'refs/heads/main' && needs.meta.outputs.is_tag_build == 'false'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine next semver tag
+        id: next
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          MAJOR=$(echo "$LAST_TAG" | sed 's/v//' | cut -d. -f1)
+          MINOR=$(echo "$LAST_TAG" | sed 's/v//' | cut -d. -f2)
+          PATCH=$(echo "$LAST_TAG" | sed 's/v//' | cut -d. -f3)
+
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          if [[ "${COMMIT_MSG}" == *"[!major]"* || "${COMMIT_MSG}" == *"BREAKING CHANGE"* ]]; then
+            NEXT_TAG="v$((MAJOR + 1)).0.0"
+          elif [[ "${COMMIT_MSG}" =~ ^feat([(:]) ]]; then
+            NEXT_TAG="v${MAJOR}.$((MINOR + 1)).0"
+          else
+            NEXT_TAG="v${MAJOR}.${MINOR}.$((PATCH + 1))"
+          fi
+          echo "tag=${NEXT_TAG}" >> "$GITHUB_OUTPUT"
+          echo "last_tag=${LAST_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Create git tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.next.outputs.tag }}" \
+            -m "Release ${{ steps.next.outputs.tag }} (${{ github.sha }})"
+          git push origin "${{ steps.next.outputs.tag }}"
+
+      - name: Extract changelog section
+        id: changelog
+        run: |
+          RANGE="${{ steps.next.outputs.last_tag }}..HEAD"
+          LOG=$(git log --pretty=format:"- %s (%h) %an" "${RANGE}" 2>/dev/null | head -50)
+          if [ -z "$LOG" ]; then LOG="- Initial automated release"; fi
+          {
+            echo "notes<<EOF"
+            echo "## Changes in ${{ steps.next.outputs.tag }}"
+            echo ""
+            echo "$LOG"
+            echo ""
+            echo "**Images:**"
+            echo "- \`${{ needs.meta.outputs.api_image }}:${{ steps.next.outputs.tag }}\`"
+            echo "- \`${{ needs.meta.outputs.web_image }}:${{ steps.next.outputs.tag }}\`"
+            echo ""
+            echo "> ⚠️ Trading software. Not financial advice."
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.next.outputs.tag }}
+          name: Release ${{ steps.next.outputs.tag }}
+          body: ${{ steps.changelog.outputs.notes }}
+          draft: false
+          prerelease: ${{ contains(steps.next.outputs.tag, '-rc') || contains(steps.next.outputs.tag, '-beta') }}
+          generate_release_notes: true
+
+  # ------------------------------------------------------------
+  # Deploy placeholder — wire this to your infrastructure
+  #
+  # Replace the body of the deploy step with one of:
+  #   • SSH + docker compose pull/up on a VPS
+  #   • kubectl apply / helm upgrade for Kubernetes
+  #   • aws ecs update-service / gcloud run deploy
+  # Secrets needed: DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY
+  # ------------------------------------------------------------
+  deploy:
+    name: Deploy (${{ inputs.environment || 'staging' }})
+    runs-on: ubuntu-latest
+    needs: [meta, build-api, build-web]
+    if: >-
+      always() &&
+      needs.build-api.result == 'success' &&
+      needs.build-web.result == 'success'
+    environment:
+      name: ${{ inputs.environment || 'staging' }}
+      url: ${{ vars.DEPLOY_URL || 'https://staging.example.com' }}
+    env:
+      TARGET_ENV: ${{ inputs.environment || 'staging' }}
+      API_IMAGE: ${{ needs.meta.outputs.api_image }}:${{ needs.meta.outputs.tag }}
+      WEB_IMAGE: ${{ needs.meta.outputs.web_image }}:${{ needs.meta.outputs.tag }}
+    steps:
+      - name: Deploy placeholder
+        run: |
+          echo "::notice::Deploying to ${TARGET_ENV}"
+          echo "  API image : ${API_IMAGE}"
+          echo "  Web image : ${WEB_IMAGE}"
+          echo ""
+          echo "No deployment target configured yet."
+          echo ""
+          echo "Wire this job up by editing .github/workflows/cd.yml → jobs.deploy."
+          echo "Example (SSH + compose):"
+          echo '  ssh deploy@$DEPLOY_HOST "cd /opt/crypto-intelligence && \'
+          echo '    export API_IMAGE='"'"''"${API_IMAGE}"'"'"'' && \'
+          echo '    export WEB_IMAGE='"'"''"${WEB_IMAGE}"'"'"'' && \'
+          echo '    docker compose -f docker-compose.yml -f docker-compose.prod.yml pull && \'
+          echo '    docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d"'
+          echo ""
+
+      - name: Mark deployment as pending manual configuration
+        run: |
+          echo "::warning::Deploy step is a placeholder — configure a real target before relying on CD."
+
+  # ------------------------------------------------------------
+  # Post-deploy health check
+  # ------------------------------------------------------------
+  health-check:
+    name: Post-Deploy Health Check
+    runs-on: ubuntu-latest
+    needs: [deploy]
+    if: always() && needs.deploy.result == 'success'
+    env:
+      TARGET_ENV: ${{ inputs.environment || 'staging' }}
+      HEALTH_URL: ${{ vars.DEPLOY_HEALTH_URL || '' }}
+    steps:
+      - name: Check deployment health
+        run: |
+          if [[ -z "${HEALTH_URL}" ]]; then
+            echo "::warning::DEPLOY_HEALTH_URL not set — skipping remote health check."
+            exit 0
+          fi
+
+          ATTEMPTS=0; MAX_ATTEMPTS=15
+          until curl -sf --max-time 10 "${HEALTH_URL}" | grep -q '"ok"\|"ready"'; do
+            ATTEMPTS=$((ATTEMPTS + 1))
+            if [[ ${ATTEMPTS} -ge ${MAX_ATTEMPTS} ]]; then
+              echo "::error::Deployment failed health check after ${MAX_ATTEMPTS} attempts: ${HEALTH_URL}"
+              exit 1
+            fi
+            echo "Attempt ${ATTEMPTS}/${MAX_ATTEMPTS} — not healthy yet, retrying in 20s..."
+            sleep 20
+          done
+          echo "✅ Deployment at ${TARGET_ENV} is healthy"
+
+  # ------------------------------------------------------------
+  # Final gate
+  # ------------------------------------------------------------
+  cd-success:
+    name: CD Success Gate
+    runs-on: ubuntu-latest
+    needs: [meta, build-api, build-web, release, deploy, health-check]
+    if: always()
+    steps:
+      - name: Evaluate outcomes
+        run: |
+          echo '${{ toJSON(needs) }}' | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          # release/deploy/health-check may be skipped legitimately
+          FAILED=$(echo '${{ toJSON(needs) }}' | jq -r '[to_entries[] | select(.value.result == "failure")] | length')
+          if [ "$FAILED" -gt 0 ]; then
+            echo "::error::${FAILED} CD job(s) failed"
+            exit 1
+          fi
+          echo "CD pipeline completed successfully ✅"

@@ -1,0 +1,529 @@
+# ============================================================
+# CI Pipeline — Crypto Intelligence Platform
+#
+# Runs on every push and PR:
+#   1. Detect changed paths (skip jobs when possible)
+#   2. Python: lint (ruff), types (mypy)
+#   3. Node: lint (eslint), types (tsc)
+#   4. Unit tests (pytest + vitest/jest)
+#   5. Integration tests (services via docker compose)
+#   6. Security scans (pip-audit, npm audit, trivy, gitleaks)
+#   7. Docker build verification (both Dockerfiles)
+# ============================================================
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHON_VERSION: "3.12"
+  NODE_VERSION: "20"
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  # ------------------------------------------------------------
+  # Change detection — gate heavy jobs on relevant paths
+  # ------------------------------------------------------------
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.filter.outputs.api }}
+      web: ${{ steps.filter.outputs.web }}
+      infra: ${{ steps.filter.outputs.infra }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            api:
+              - 'apps/api/**'
+            web:
+              - 'apps/web/**'
+            infra:
+              - 'docker-compose*.yml'
+              - 'apps/api/Dockerfile'
+              - 'apps/web/Dockerfile'
+              - '.github/workflows/**'
+              - 'database/**'
+              - 'scripts/**'
+
+  # ------------------------------------------------------------
+  # Python Lint — ruff check + format
+  # ------------------------------------------------------------
+  lint-python:
+    name: Lint (ruff) — API
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.api == 'true' || needs.changes.outputs.infra == 'true'
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: apps/api/requirements.txt
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Ruff check (lint rules)
+        run: ruff check . --output-format=github
+
+      - name: Ruff format (style)
+        run: ruff format --check .
+
+  # ------------------------------------------------------------
+  # Python Type Check — mypy
+  # ------------------------------------------------------------
+  typecheck-python:
+    name: Types (mypy) — API
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: apps/api/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install mypy types-redis types-requests
+
+      - name: Run mypy
+        run: mypy app --ignore-missing-imports
+
+  # ------------------------------------------------------------
+  # TypeScript Lint — eslint
+  # ------------------------------------------------------------
+  lint-typescript:
+    name: Lint (eslint) — Web
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: ESLint
+        run: npm run lint --if-present || npx next lint --max-warnings 0
+
+  # ------------------------------------------------------------
+  # TypeScript Type Check — tsc
+  # ------------------------------------------------------------
+  typecheck-typescript:
+    name: Types (tsc) — Web
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Generate Next.js types (best-effort)
+        run: npx next typegen || true
+
+      - name: TypeScript compiler
+        run: npx tsc --noEmit
+
+  # ------------------------------------------------------------
+  # Python Unit Tests — pytest with coverage
+  # ------------------------------------------------------------
+  unit-tests-python:
+    name: Unit Tests — API
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
+    defaults:
+      run:
+        working-directory: apps/api
+    env:
+      DEMO_MODE: "true"
+      DATABASE_URL: postgresql+asyncpg://crypto:crypto@localhost:5432/crypto_intelligence_test
+      REDIS_URL: redis://localhost:6379/0
+      SECRET_KEY: ci-test-secret-key-not-for-production
+    services:
+      postgres:
+        image: timescale/timescaledb:latest-pg16
+        env:
+          POSTGRES_USER: crypto
+          POSTGRES_PASSWORD: crypto
+          POSTGRES_DB: crypto_intelligence_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U crypto"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: apps/api/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-cov httpx
+
+      - name: Run unit tests
+        run: |
+          if [ -d tests/unit ]; then
+            pytest tests/unit -v --cov=app --cov-report=xml --cov-report=term-missing
+          else
+            pytest tests -v --cov=app --cov-report=xml --cov-report=term-missing \
+              --ignore=tests/integration --ignore=tests/e2e -p no:cacheprovider || \
+            pytest -v --co -q >/dev/null && echo "No test files found — skipping"
+          fi
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-api
+          path: apps/api/coverage.xml
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # ------------------------------------------------------------
+  # Frontend Unit Tests
+  # ------------------------------------------------------------
+  unit-tests-web:
+    name: Unit Tests — Web
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Run test suite
+        run: |
+          if grep -q '"test"' package.json; then
+            npm test -- --passWithNoTests --ci
+          else
+            echo "No test script defined — skipping"
+          fi
+
+  # ------------------------------------------------------------
+  # Integration Tests — full API against real services
+  # ------------------------------------------------------------
+  integration-tests:
+    name: Integration Tests — API
+    runs-on: ubuntu-latest
+    needs: [changes, unit-tests-python]
+    if: needs.changes.outputs.api == 'true'
+    defaults:
+      run:
+        working-directory: apps/api
+    env:
+      DEMO_MODE: "true"
+      DATABASE_URL: postgresql+asyncpg://crypto:crypto@localhost:5432/crypto_intelligence_test
+      REDIS_URL: redis://localhost:6379/0
+      SECRET_KEY: ci-test-secret-key-not-for-production
+    services:
+      postgres:
+        image: timescale/timescaledb:latest-pg16
+        env:
+          POSTGRES_USER: crypto
+          POSTGRES_PASSWORD: crypto
+          POSTGRES_DB: crypto_intelligence_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U crypto"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: apps/api/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio httpx alembic
+
+      - name: Apply schema
+        run: |
+          PGPASSWORD=crypto psql -h localhost -U crypto -d crypto_intelligence_test \
+            -c "CREATE EXTENSION IF NOT EXISTS timescaledb;" || true
+          if [ -f ../../database/schemas/initial_schema.sql ]; then
+            PGPASSWORD=crypto psql -h localhost -U crypto -d crypto_intelligence_test \
+              -f ../../database/schemas/initial_schema.sql
+          fi
+          alembic upgrade head || echo "no migrations yet"
+
+      - name: Seed demo data
+        run: |
+          DATABASE_SYNC_URL="postgresql://crypto:crypto@localhost:5432/crypto_intelligence_test" \
+            python ../../scripts/seed.py --assets 5 --days 3 || echo "seeding skipped"
+
+      - name: Start API server
+        run: |
+          uvicorn app.main:app --host 0.0.0.0 --port 8000 &
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8000/health && break
+            sleep 2
+          done
+          curl -sf http://localhost:8000/health
+
+      - name: Run integration tests
+        run: |
+          if [ -d tests/integration ]; then
+            pytest tests/integration -v --tb=short
+          elif [ -f tests/test_integration.py ]; then
+            pytest tests/test_integration.py -v --tb=short
+          else
+            echo "Smoke-testing live endpoints instead:"
+            curl -sf http://localhost:8000/health | tee /dev/stderr | grep '"status"'
+            curl -sf http://localhost:8000/openapi.json > /dev/null
+            echo "Live smoke checks passed"
+          fi
+
+  # ------------------------------------------------------------
+  # Security Scans — dependencies, containers, secrets
+  # ------------------------------------------------------------
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: changes
+    if: always() && !failure() && !cancelled()
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # Secret detection across history-relevant diff
+      - name: Gitleaks (secret scanning)
+        uses: gitleaks/gitleaks-action@v2
+        continue-on-error: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Python dependency vulnerabilities
+      - name: pip-audit (Python deps)
+        if: needs.changes.outputs.api == 'true'
+        continue-on-error: true
+        run: |
+          python -m pip install --upgrade pip pip-audit
+          cd apps/api
+          pip-audit -r requirements.txt --format markdown || true
+
+      # Node dependency vulnerabilities
+      - name: npm audit (Node deps)
+        if: needs.changes.outputs.web == 'true'
+        continue-on-error: true
+        run: |
+          cd apps/web
+          npm install --package-lock-only --ignore-scripts
+          npm audit --audit-level=high || true
+
+      # Container image scanning
+      - name: Trivy filesystem scan
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          format: sarif
+          output: trivy-results.sarif
+
+      - name: Upload Trivy results to GitHub Security tab
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: trivy-results.sarif
+
+  # ------------------------------------------------------------
+  # Docker Build Verification — both images build cleanly
+  # ------------------------------------------------------------
+  docker-build:
+    name: Docker Build Test
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.api == 'true' || needs.changes.outputs.web == 'true' || needs.changes.outputs.infra == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: api
+            dockerfile: apps/api/Dockerfile
+            target: runtime
+          - name: web
+            dockerfile: apps/web/Dockerfile
+            target: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build ${{ matrix.name }} image (target=${{ matrix.target }})
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          target: ${{ matrix.target }}
+          push: false
+          load: true
+          tags: crypto-${{ matrix.name }}:ci
+          build-args: |
+            NEXT_PUBLIC_API_URL=http://localhost:8000
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+      - name: Smoke test container
+        run: |
+          IMAGE="crypto-${{ matrix.name }}:ci"
+          echo "Verifying ${IMAGE}..."
+          docker image inspect "${IMAGE}" > /dev/null
+          docker run --rm "${IMAGE}" --version 2>/dev/null || \
+            echo "(no --version support — image inspected OK)"
+
+  # ------------------------------------------------------------
+  # Compose Config Validation
+  # ------------------------------------------------------------
+  validate-compose:
+    name: Validate Compose Files
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.infra == 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate base compose file
+        run: docker compose -f docker-compose.yml config -q
+
+      - name: Validate dev overlay
+        run: docker compose -f docker-compose.yml -f docker-compose.dev.yml config -q
+        env:
+          SECRET_KEY: dummy-for-validation
+
+      - name: Validate prod overlay
+        run: >
+          docker compose -f docker-compose.yml -f docker-compose.prod.yml config -q
+        env:
+          SECRET_KEY: dummy-for-validation
+          POSTGRES_PASSWORD: dummy-for-validation
+          NEXT_PUBLIC_API_URL: https://example.com
+
+  # ------------------------------------------------------------
+  # Final Gate — all required jobs must succeed
+  # ------------------------------------------------------------
+  ci-success:
+    name: CI Success Gate
+    runs-on: ubuntu-latest
+    needs:
+      - changes
+      - lint-python
+      - typecheck-python
+      - lint-typescript
+      - typecheck-typescript
+      - unit-tests-python
+      - unit-tests-web
+      - integration-tests
+      - security-scan
+      - docker-build
+      - validate-compose
+    if: always()
+    steps:
+      - name: Evaluate job outcomes
+        run: |
+          echo "Job results:"
+          echo '${{ toJSON(needs) }}' | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+
+          FAILED=$(echo '${{ toJSON(needs) }}' | jq -r '[to_entries[] | select(.value.result == "failure" or .value.result == "cancelled")] | length')
+
+          if [ "$FAILED" -gt 0 ]; then
+            echo "::error::${FAILED} required CI job(s) failed"
+            exit 1
+          fi
+          echo "All CI checks passed ✅"

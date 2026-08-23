@@ -1,0 +1,108 @@
+# ============================================================
+# DEVELOPMENT OVERRIDES
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+# Adds hot reload, debug tooling, exposed debug ports, and
+# relaxed settings for local development.
+# ============================================================
+
+services:
+  postgres:
+    ports: ["5432:5432"]
+    command: >
+      postgres -c shared_buffers=128MB
+               -c max_connections=100
+               -c log_min_duration_statement=500
+
+  redis:
+    ports: ["6379:6379"]
+    command: redis-server --appendonly no --save ""
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: development
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    environment:
+      - DEMO_MODE=true
+      - LOG_LEVEL=DEBUG
+      - RELOAD=true
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./apps/api:/app
+      - /app/__pycache__
+      - /app/.pytest_cache
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: development
+    command: celery -A app.workers.celery_app worker -l debug -c 2 --reload
+    environment:
+      - DEMO_MODE=true
+      - LOG_LEVEL=DEBUG
+      - C_FORCE_ROOT=1
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./apps/api:/app
+      - /app/__pycache__
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: development
+    environment:
+      - LOG_LEVEL=DEBUG
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./apps/api:/app
+      - /app/__pycache__
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      target: development
+    command: npm run dev
+    environment:
+      - NODE_ENV=development
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - WATCHPACK_POLLING=true
+      - CHOKIDAR_USEPOLLING=true
+    volumes:
+      - ./apps/web:/app
+      - /app/node_modules
+      - /app/.next
+
+  # --------------------------------------------------------
+  # Development-only services
+  # --------------------------------------------------------
+
+  adminer:
+    image: adminer:latest
+    ports: ["8080:8080"]
+    environment:
+      - ADMINER_DEFAULT_SERVER=postgres
+      - ADMINER_DESIGN=dracula
+    depends_on: [postgres]
+    profiles: ["debug"]
+
+  mailpit:
+    image: axllent/mailpit:latest
+    ports: ["1025:1025", "8025:8025"]
+    profiles: ["debug"]
+
+  redis-insight:
+    image: redis/redisinsight:latest
+    ports: ["5540:5540"]
+    depends_on: [redis]
+    profiles: ["debug"]
