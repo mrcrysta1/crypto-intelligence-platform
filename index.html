@@ -95,26 +95,35 @@ tr:hover td{background:var(--hover)}
 
 /* Charts specific */
 .chart-controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-.chart-container{background:var(--card);border:1px solid var(--border);border-radius:0.5rem;overflow:hidden;position:relative}
-.chart-canvas{width:100%;display:block}
-.chart-toolbar{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-bottom:1px solid var(--border);flex-wrap:wrap;gap:8px}
-.timeframe-btn{padding:4px 10px;border-radius:4px;font-size:0.7rem;border:1px solid var(--border);background:transparent;color:var(--t2);cursor:pointer;font-family:'JetBrains Mono',monospace;transition:all .2s}
-.timeframe-btn:hover,.timeframe-btn.active{background:var(--blue);color:#0a0a0f;border-color:var(--blue)}
-.live-dot{width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block;animation:pulse 1.5s infinite;margin-right:4px}
-.chart-legend{display:flex;gap:12px;font-size:0.7rem;color:var(--t2)}
-.chart-legend span{display:flex;align-items:center;gap:4px}
-.chart-legend .dot{width:6px;height:6px}
+.chart-panel{background:var(--card);border:1px solid var(--border);border-radius:0.5rem;overflow:hidden;position:relative;display:flex;flex-direction:column}
+.chart-panel-toolbar{display:flex;align-items:center;justify-content:space-between;padding:6px 10px;border-bottom:1px solid var(--border);flex-wrap:wrap;gap:6px}
+.chart-panel-toolbar select{padding:3px 6px;font-size:0.7rem;border-radius:4px;background:var(--hover);border:1px solid var(--border);color:var(--t1);font-family:'JetBrains Mono',monospace}
+.chart-panel-toolbar select:focus{border-color:var(--blue);outline:none}
+.chart-panel-body{flex:1;position:relative;min-height:0}
 .chart-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(10,10,15,.8);z-index:5}
-.spinner{width:24px;height:24px;border:2px solid var(--border);border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite}
+.spinner{width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--blue);border-radius:50%;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
+.live-dot{width:6px;height:6px;border-radius:50%;background:var(--green);display:inline-block;animation:pulse 1.5s infinite;margin-right:4px}
 .price-ticker{font-size:1.5rem;font-weight:700;font-family:'JetBrains Mono',monospace}
 .change-pill{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:4px;font-size:0.75rem;font-family:'JetBrains Mono',monospace}
 .change-up{background:rgba(34,197,94,.15);color:var(--green)}
 .change-down{background:rgba(239,68,68,.15);color:var(--red)}
-.grid-layout{display:grid;gap:1rem}
-.grid-1x1{grid-template-columns:1fr}
-.grid-2x1{grid-template-columns:1fr 1fr}
-.grid-1x2{grid-template-columns:1fr;grid-template-rows:auto auto}
+.chart-grid{display:grid;gap:10px;width:100%}
+.chart-grid-1{grid-template-columns:1fr}
+.chart-grid-2{grid-template-columns:1fr 1fr}
+.chart-grid-3{grid-template-columns:1fr 1fr 1fr}
+.chart-grid-4{grid-template-columns:1fr 1fr}
+.chart-grid-6{grid-template-columns:1fr 1fr 1fr}
+@media(max-width:1200px){.chart-grid-3,.chart-grid-6{grid-template-columns:1fr 1fr}}
+@media(max-width:768px){.chart-grid-2,.chart-grid-3,.chart-grid-4,.chart-grid-6{grid-template-columns:1fr}}
+.global-controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.global-controls select,.global-controls button{padding:5px 10px;font-size:0.75rem;border-radius:4px;font-family:'JetBrains Mono',monospace}
+.global-controls select{background:var(--hover);border:1px solid var(--border);color:var(--t1)}
+.global-controls select:focus{border-color:var(--blue);outline:none}
+.global-controls button{background:var(--blue);color:#0a0a0f;border:none;cursor:pointer;font-weight:600;transition:opacity .2s}
+.global-controls button:hover{opacity:.85}
+.layout-btn{width:28px;height:28px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--t2);cursor:pointer;font-size:0.7rem;font-family:'JetBrains Mono',monospace;display:inline-flex;align-items:center;justify-content:center;transition:all .2s}
+.layout-btn:hover,.layout-btn.active{background:var(--blue);color:#0a0a0f;border-color:var(--blue)}
 </style>
 </head>
 <body>
@@ -174,75 +183,43 @@ tr:hover td{background:var(--hover)}
 
     <!-- LIVE CHARTS -->
     <div class="page" id="page-charts">
-      <div class="flex justify-between items-center mb-4" style="flex-wrap:wrap;gap:8px">
+      <div class="flex justify-between items-center mb-3" style="flex-wrap:wrap;gap:8px">
         <div class="flex items-center gap-3">
           <h2 class="text-lg font-semibold">Live Charts</h2>
           <span class="flex items-center text-xs t-green mono"><span class="live-dot"></span>LIVE from Binance</span>
         </div>
-        <div class="chart-controls">
-          <select class="select" id="chart-asset" onchange="loadChartData()" style="width:130px">
-            <option value="BTCUSDT">BTC/USDT</option>
-            <option value="ETHUSDT">ETH/USDT</option>
-            <option value="SOLUSDT">SOL/USDT</option>
-            <option value="BNBUSDT">BNB/USDT</option>
-            <option value="XRPUSDT">XRP/USDT</option>
-            <option value="ADAUSDT">ADA/USDT</option>
-            <option value="DOGEUSDT">DOGE/USDT</option>
-            <option value="DOTUSDT">DOT/USDT</option>
-            <option value="AVAXUSDT">AVAX/USDT</option>
-            <option value="LINKUSDT">LINK/USDT</option>
-            <option value="MATICUSDT">MATIC/USDT</option>
-            <option value="UNIUSDT">UNI/USDT</option>
-          </select>
-          <select class="select" id="chart-type" onchange="switchChartType()">
-            <option value="candle">🕯️ Candlestick</option>
+        <div class="global-controls">
+          <select id="g-chart-type" onchange="refreshAllPanels()">
+            <option value="candle">🕯️ Candle</option>
             <option value="line">📈 Line</option>
             <option value="area">📊 Area</option>
             <option value="volume">📦 Volume</option>
             <option value="rsi">📉 RSI</option>
             <option value="macd">📊 MACD</option>
-            <option value="multi">🔄 Multi-Compare</option>
           </select>
-          <label class="flex items-center gap-2 text-xs t-gray cursor-pointer">
-            <input type="checkbox" id="auto-refresh" onchange="toggleAutoRefresh()" checked> Auto-refresh
-          </label>
+          <select id="g-refresh" onchange="toggleAutoRefresh()">
+            <option value="0">Auto-refresh Off</option>
+            <option value="3000">3s</option>
+            <option value="5000">5s</option>
+            <option value="10000">10s</option>
+            <option value="30000" selected>30s</option>
+            <option value="60000">60s</option>
+          </select>
+          <button onclick="refreshAllPanels()">⟳ Refresh All</button>
+          <div class="flex items-center gap-1">
+            <span class="text-xs t-gray mono mr-1">Layout:</span>
+            <button class="layout-btn active" data-layout="1" onclick="setLayout(1,this)">1</button>
+            <button class="layout-btn" data-layout="2" onclick="setLayout(2,this)">2</button>
+            <button class="layout-btn" data-layout="3" onclick="setLayout(3,this)">3</button>
+            <button class="layout-btn" data-layout="4" onclick="setLayout(4,this)">4</button>
+            <button class="layout-btn" data-layout="6" onclick="setLayout(6,this)">6</button>
+          </div>
         </div>
       </div>
 
-      <!-- Single Chart -->
-      <div id="single-chart-section">
-        <div class="chart-toolbar">
-          <div class="flex items-center gap-3" id="chart-info">
-            <span class="mono font-bold text-lg" id="chart-symbol">BTC/USDT</span>
-            <span class="price-ticker" id="chart-price">-</span>
-            <span class="change-pill" id="chart-change">-</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <button class="timeframe-btn active" data-tf="1h" onclick="setTimeframe('1h',this)">1H</button>
-            <button class="timeframe-btn" data-tf="4h" onclick="setTimeframe('4h',this)">4H</button>
-            <button class="timeframe-btn" data-tf="1d" onclick="setTimeframe('1d',this)">1D</button>
-            <button class="timeframe-btn" data-tf="1w" onclick="setTimeframe('1w',this)">1W</button>
-          </div>
-        </div>
-        <div class="chart-container" style="height:450px" id="main-chart-wrap">
-          <div class="chart-loading" id="chart-loading"><div class="spinner"></div></div>
-          <div id="main-chart" style="width:100%;height:100%"></div>
-        </div>
-        <div class="grid grid-4 gap-4 mt-4" id="chart-stats"></div>
-      </div>
+      <div id="chart-header-bar" class="mb-3"></div>
 
-      <!-- Multi Compare -->
-      <div id="multi-chart-section" style="display:none">
-        <div class="card mb-4">
-          <div class="card-header">
-            <h2>Multi-Asset Comparison (Normalized %)</h2>
-            <div class="flex gap-2" id="compare-selections"></div>
-          </div>
-          <div class="chart-container" style="height:400px">
-            <div id="multi-chart" style="width:100%;height:100%"></div>
-          </div>
-        </div>
-      </div>
+      <div class="chart-grid chart-grid-1" id="chart-grid"></div>
     </div>
 
     <!-- SCREENER -->
@@ -394,165 +371,264 @@ async function getAllPrices() {
   }));
 }
 
-// ===== CHART STATE =====
-let mainChart = null;
-let candleSeries = null;
-let volumeSeries = null;
-let currentTimeframe = "1h";
-let currentSymbol = "BTCUSDT";
-let autoRefreshInterval = null;
-let multiChart = null;
-let multiSeries = {};
+// ===== ALL BINANCE TIMEFRAMES =====
+const ALL_TIMEFRAMES = [
+  { value: "1s",  label: "1s" },
+  { value: "1m",  label: "1m" },
+  { value: "3m",  label: "3m" },
+  { value: "5m",  label: "5m" },
+  { value: "15m", label: "15m" },
+  { value: "30m", label: "30m" },
+  { value: "1h",  label: "1H" },
+  { value: "2h",  label: "2H" },
+  { value: "4h",  label: "4H" },
+  { value: "6h",  label: "6H" },
+  { value: "8h",  label: "8H" },
+  { value: "12h", label: "12H" },
+  { value: "1d",  label: "1D" },
+  { value: "3d",  label: "3D" },
+  { value: "1w",  label: "1W" },
+  { value: "1M",  label: "1M" },
+];
 
-const ASSET_NAMES = {BTCUSDT:"BTC",ETHUSDT:"ETH",SOLUSDT:"SOL",BNBUSDT:"BNB",XRPUSDT:"XRP",ADAUSDT:"ADA",DOGEUSDT:"DOGE",DOTUSDT:"DOT",AVAXUSDT:"AVAX",LINKUSDT:"LINK",MATICUSDT:"MATIC",UNIUSDT:"UNI"};
+const ASSETS = [
+  { sym: "BTCUSDT",  name: "BTC" },
+  { sym: "ETHUSDT",  name: "ETH" },
+  { sym: "SOLUSDT",  name: "SOL" },
+  { sym: "BNBUSDT",  name: "BNB" },
+  { sym: "XRPUSDT",  name: "XRP" },
+  { sym: "ADAUSDT",  name: "ADA" },
+  { sym: "DOGEUSDT", name: "DOGE" },
+  { sym: "DOTUSDT",  name: "DOT" },
+  { sym: "AVAXUSDT", name: "AVAX" },
+  { sym: "LINKUSDT", name: "LINK" },
+  { sym: "MATICUSDT",name: "MATIC" },
+  { sym: "UNIUSDT",  name: "UNI" },
+];
 
-// ===== CHART RENDERING =====
-function initMainChart() {
-  const container = document.getElementById("main-chart");
-  container.innerHTML = "";
-  mainChart = LightweightCharts.createChart(container, {
+const ASSET_MAP = Object.fromEntries(ASSETS.map(a => [a.sym, a.name]));
+
+// ===== CHART PANEL STATE =====
+let chartPanels = {};    // panelId -> { chart, series, symbol, timeframe }
+let currentLayout = 1;
+let autoRefreshTimer = null;
+let panelIdCounter = 0;
+
+function makeAssetOptions(selected) {
+  return ASSETS.map(a =>
+    `<option value="${a.sym}"${a.sym === selected ? " selected" : ""}>${a.name}/USDT</option>`
+  ).join("");
+}
+
+function makeTfOptions(selected) {
+  return ALL_TIMEFRAMES.map(t =>
+    `<option value="${t.value}"${t.value === selected ? " selected" : ""}>${t.label}</option>`
+  ).join("");
+}
+
+// ===== CHART CREATION =====
+function createPanelChart(container) {
+  return LightweightCharts.createChart(container, {
     width: container.clientWidth,
-    height: 450,
+    height: container.clientHeight || 300,
     layout: { background: { color: "#12121a" }, textColor: "#8b949e", fontFamily: "JetBrains Mono" },
-    grid: { vertLines: { color: "rgba(30,45,74,0.3)" }, horzLines: { color: "rgba(30,45,74,0.3)" } },
+    grid: { vertLines: { color: "rgba(30,45,74,0.2)" }, horzLines: { color: "rgba(30,45,74,0.2)" } },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
     timeScale: { borderColor: "#1e2d4a", timeVisible: true, secondsVisible: false },
     rightPriceScale: { borderColor: "#1e2d4a" },
   });
-
-  new ResizeObserver(() => {
-    if (mainChart) mainChart.applyOptions({ width: container.clientWidth });
-  }).observe(container);
 }
 
-function initMultiChart() {
-  const container = document.getElementById("multi-chart");
-  container.innerHTML = "";
-  multiChart = LightweightCharts.createChart(container, {
-    width: container.clientWidth,
-    height: 400,
-    layout: { background: { color: "#12121a" }, textColor: "#8b949e", fontFamily: "JetBrains Mono" },
-    grid: { vertLines: { color: "rgba(30,45,74,0.3)" }, horzLines: { color: "rgba(30,45,74,0.3)" } },
-    timeScale: { borderColor: "#1e2d4a", timeVisible: true },
-    rightPriceScale: { borderColor: "#1e2d4a" },
-  });
-  new ResizeObserver(() => {
-    if (multiChart) multiChart.applyOptions({ width: container.clientWidth });
-  }).observe(container);
+function buildPanelHTML(id, symbol, timeframe) {
+  return `
+    <div class="chart-panel" id="panel-${id}">
+      <div class="chart-panel-toolbar">
+        <select onchange="changePanelAsset(${id},this.value)">${makeAssetOptions(symbol)}</select>
+        <select onchange="changePanelTf(${id},this.value)">${makeTfOptions(timeframe)}</select>
+        <span class="mono text-xs t-gray" id="panel-price-${id}">...</span>
+        <span class="change-pill" id="panel-chg-${id}">...</span>
+      </div>
+      <div class="chart-panel-body">
+        <div class="chart-loading" id="panel-load-${id}"><div class="spinner"></div></div>
+        <div id="panel-chart-${id}" style="width:100%;height:100%"></div>
+      </div>
+    </div>`;
 }
 
-async function loadChartData() {
-  currentSymbol = document.getElementById("chart-asset").value;
-  const loading = document.getElementById("chart-loading");
-  loading.style.display = "flex";
+// ===== LAYOUT =====
+function setLayout(n, btn) {
+  currentLayout = n;
+  document.querySelectorAll(".layout-btn").forEach(b => b.classList.remove("active"));
+  btn.classList.add("active");
 
-  try {
-    const [klines, ticker] = await Promise.all([
-      getLiveKlines(currentSymbol, currentTimeframe, 200),
-      getLivePrice(currentSymbol),
-    ]);
+  const grid = document.getElementById("chart-grid");
+  grid.className = "chart-grid chart-grid-" + n;
 
-    document.getElementById("chart-symbol").textContent = ASSET_NAMES[currentSymbol] + "/USDT";
-    document.getElementById("chart-price").textContent = "$" + parseFloat(ticker.lastPrice).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
-    const chg = parseFloat(ticker.priceChangePercent);
-    const chgEl = document.getElementById("chart-change");
-    chgEl.textContent = (chg >= 0 ? "+" : "") + chg.toFixed(2) + "%";
-    chgEl.className = "change-pill " + (chg >= 0 ? "change-up" : "change-down");
+  const defaults = [
+    { sym: "BTCUSDT", tf: "1h" },
+    { sym: "ETHUSDT", tf: "1h" },
+    { sym: "SOLUSDT", tf: "1h" },
+    { sym: "BNBUSDT", tf: "1h" },
+    { sym: "XRPUSDT", tf: "1h" },
+    { sym: "ADAUSDT", tf: "1h" },
+  ];
 
-    const chartType = document.getElementById("chart-type").value;
-    renderChartByType(klines, chartType);
+  grid.innerHTML = "";
+  Object.values(chartPanels).forEach(p => { try { p.chart.remove(); } catch(e){} });
+  chartPanels = {};
 
-    // Stats
-    const closes = klines.map(k => k.close);
-    const volumes = klines.map(k => k.volume);
-    const high24 = Math.max(...klines.slice(-24).map(k => k.high));
-    const low24 = Math.min(...klines.slice(-24).map(k => k.low));
-    const avgVol = volumes.slice(-24).reduce((a, b) => a + b, 0) / 24;
-    const rsi = calcRSI(closes, 14);
+  for (let i = 0; i < n; i++) {
+    const id = panelIdCounter++;
+    const d = defaults[i] || { sym: "BTCUSDT", tf: "1h" };
+    grid.insertAdjacentHTML("beforeend", buildPanelHTML(id, d.sym, d.tf));
 
-    document.getElementById("chart-stats").innerHTML = [
-      { l: "24h High", v: "$" + high24.toLocaleString(undefined, {maximumFractionDigits: 2}), c: "var(--green)" },
-      { l: "24h Low", v: "$" + low24.toLocaleString(undefined, {maximumFractionDigits: 2}), c: "var(--red)" },
-      { l: "24h Volume", v: "$" + (avgVol * parseFloat(ticker.lastPrice)).toLocaleString(undefined, {maximumFractionDigits: 0}), c: "var(--blue)" },
-      { l: "RSI (14)", v: rsi.toFixed(1), c: rsi > 70 ? "var(--red)" : rsi < 30 ? "var(--green)" : "var(--yellow)" },
-    ].map(s => `<div class="card"><div class="text-xs t-gray uppercase">${s.l}</div><div class="text-xl font-bold mono mt-2" style="color:${s.c}">${s.v}</div></div>`).join("");
+    const container = document.getElementById("panel-chart-" + id);
+    const chart = createPanelChart(container);
+    chartPanels[id] = { chart, series: null, symbol: d.sym, timeframe: d.tf, container };
 
-    // Update header ticker
-    document.getElementById("header-ticker").innerHTML = `
-      <span class="badge badge-green"><span class="live-dot"></span>LIVE</span>
-      <div class="mono text-xs"><span class="t-gray">${ASSET_NAMES[currentSymbol]}</span> <span class="t-green">$${parseFloat(ticker.lastPrice).toLocaleString(undefined, {maximumFractionDigits: 2})}</span></div>
-      <div class="mono text-xs"><span class="t-gray">ETH</span> <span class="t-green" id="eth-price">...</span></div>`;
+    new ResizeObserver(() => {
+      if (chartPanels[id]) {
+        chartPanels[id].chart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
+      }
+    }).observe(container);
+  }
 
-    getLivePrice("ETHUSDT").then(t => {
-      document.getElementById("eth-price").textContent = "$" + parseFloat(t.lastPrice).toLocaleString(undefined, {maximumFractionDigits: 2});
-    });
+  refreshAllPanels();
+}
 
-  } catch (err) {
-    console.error("Chart load error:", err);
-  } finally {
-    loading.style.display = "none";
+// ===== PER-PANEL CONTROLS =====
+function changePanelAsset(id, newSym) {
+  if (chartPanels[id]) {
+    chartPanels[id].symbol = newSym;
+    loadPanel(id);
   }
 }
 
-function renderChartByType(klines, type) {
-  if (mainChart) {
-    mainChart.remove();
-    mainChart = null;
+function changePanelTf(id, newTf) {
+  if (chartPanels[id]) {
+    chartPanels[id].timeframe = newTf;
+    loadPanel(id);
   }
-  initMainChart();
+}
+
+// ===== RENDER CHART BY TYPE (per panel) =====
+function renderPanelChart(panel, klines, type) {
+  const { chart, container } = panel;
+
+  if (panel.series) {
+    panel.series.forEach(s => { try { chart.removeSeries(s); } catch(e){} });
+  }
+  panel.series = [];
 
   if (type === "candle") {
-    candleSeries = mainChart.addCandlestickSeries({
+    const cs = chart.addCandlestickSeries({
       upColor: "#22c55e", downColor: "#ef4444", borderUpColor: "#22c55e", borderDownColor: "#ef4444",
       wickUpColor: "#22c55e", wickDownColor: "#ef4444",
     });
-    candleSeries.setData(klines);
-    volumeSeries = mainChart.addHistogramSeries({ color: "#38bdf8", priceFormat: { type: "volume" }, priceScaleId: "vol" });
-    mainChart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
-    volumeSeries.setData(klines.map(k => ({ time: k.time, value: k.volume, color: k.close >= k.open ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)" })));
+    cs.setData(klines);
+    panel.series.push(cs);
+
+    const vol = chart.addHistogramSeries({ color: "#38bdf8", priceFormat: { type: "volume" }, priceScaleId: "vol" });
+    chart.priceScale("vol").applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
+    vol.setData(klines.map(k => ({ time: k.time, value: k.volume, color: k.close >= k.open ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)" })));
+    panel.series.push(vol);
 
   } else if (type === "line") {
-    candleSeries = mainChart.addLineSeries({ color: "#38bdf8", lineWidth: 2 });
-    candleSeries.setData(klines.map(k => ({ time: k.time, value: k.close })));
+    const ls = chart.addLineSeries({ color: "#38bdf8", lineWidth: 2 });
+    ls.setData(klines.map(k => ({ time: k.time, value: k.close })));
+    panel.series.push(ls);
 
   } else if (type === "area") {
-    candleSeries = mainChart.addAreaSeries({
-      topColor: "rgba(56,189,248,0.4)", bottomColor: "rgba(56,189,248,0.05)",
-      lineColor: "#38bdf8", lineWidth: 2,
-    });
-    candleSeries.setData(klines.map(k => ({ time: k.time, value: k.close })));
+    const as = chart.addAreaSeries({ topColor: "rgba(56,189,248,0.4)", bottomColor: "rgba(56,189,248,0.05)", lineColor: "#38bdf8", lineWidth: 2 });
+    as.setData(klines.map(k => ({ time: k.time, value: k.close })));
+    panel.series.push(as);
 
   } else if (type === "volume") {
-    candleSeries = mainChart.addHistogramSeries({ color: "#38bdf8" });
-    candleSeries.setData(klines.map(k => ({
-      time: k.time, value: k.volume,
-      color: k.close >= k.open ? "rgba(34,197,94,0.7)" : "rgba(239,68,68,0.7)",
-    })));
+    const vs = chart.addHistogramSeries({ color: "#38bdf8" });
+    vs.setData(klines.map(k => ({ time: k.time, value: k.volume, color: k.close >= k.open ? "rgba(34,197,94,0.7)" : "rgba(239,68,68,0.7)" })));
+    panel.series.push(vs);
 
   } else if (type === "rsi") {
-    const rsiData = calcRSIArray(klines.map(k => k.close), klines.map(k => k.time), 14);
-    candleSeries = mainChart.addLineSeries({ color: "#a78bfa", lineWidth: 2 });
-    candleSeries.setData(rsiData);
-    // Overbought/Oversold lines
-    const obLine = mainChart.addLineSeries({ color: "rgba(239,68,68,0.5)", lineWidth: 1, lineStyle: 2 });
-    obLine.setData(klines.map(k => ({ time: k.time, value: 70 })));
-    const osLine = mainChart.addLineSeries({ color: "rgba(34,197,94,0.5)", lineWidth: 1, lineStyle: 2 });
-    osLine.setData(klines.map(k => ({ time: k.time, value: 30 })));
+    const closes = klines.map(k => k.close);
+    const times = klines.map(k => k.time);
+    const rsiData = calcRSIArray(closes, times, 14);
+    const rs = chart.addLineSeries({ color: "#a78bfa", lineWidth: 2 });
+    rs.setData(rsiData);
+    panel.series.push(rs);
+    const ob = chart.addLineSeries({ color: "rgba(239,68,68,0.5)", lineWidth: 1, lineStyle: 2 });
+    ob.setData(klines.map(k => ({ time: k.time, value: 70 })));
+    panel.series.push(ob);
+    const os = chart.addLineSeries({ color: "rgba(34,197,94,0.5)", lineWidth: 1, lineStyle: 2 });
+    os.setData(klines.map(k => ({ time: k.time, value: 30 })));
+    panel.series.push(os);
 
   } else if (type === "macd") {
     const closes = klines.map(k => k.close);
     const times = klines.map(k => k.time);
     const macdData = calcMACD(closes, times);
-    candleSeries = mainChart.addLineSeries({ color: "#38bdf8", lineWidth: 2, title: "MACD" });
-    candleSeries.setData(macdData.macd);
-    const sigLine = mainChart.addLineSeries({ color: "#ef4444", lineWidth: 1, title: "Signal" });
-    sigLine.setData(macdData.signal);
-    const hist = mainChart.addHistogramSeries({ color: "#22c55e" });
-    hist.setData(macdData.histogram);
+    const ml = chart.addLineSeries({ color: "#38bdf8", lineWidth: 2 });
+    ml.setData(macdData.macd);
+    panel.series.push(ml);
+    const sl = chart.addLineSeries({ color: "#ef4444", lineWidth: 1 });
+    sl.setData(macdData.signal);
+    panel.series.push(sl);
+    const hg = chart.addHistogramSeries({ color: "#22c55e" });
+    hg.setData(macdData.histogram);
+    panel.series.push(hg);
   }
 
-  mainChart.timeScale().fitContent();
+  chart.timeScale().fitContent();
 }
+
+// ===== LOAD SINGLE PANEL =====
+async function loadPanel(id) {
+  const panel = chartPanels[id];
+  if (!panel) return;
+  const { symbol, timeframe } = panel;
+  const loadingEl = document.getElementById("panel-load-" + id);
+  if (loadingEl) loadingEl.style.display = "flex";
+
+  try {
+    const chartType = document.getElementById("g-chart-type").value;
+    const [klines, ticker] = await Promise.all([
+      getLiveKlines(symbol, timeframe, 200),
+      getLivePrice(symbol),
+    ]);
+
+    renderPanelChart(panel, klines, chartType);
+
+    const chg = parseFloat(ticker.priceChangePercent);
+    const priceEl = document.getElementById("panel-price-" + id);
+    const chgEl = document.getElementById("panel-chg-" + id);
+    if (priceEl) priceEl.textContent = "$" + parseFloat(ticker.lastPrice).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    if (chgEl) {
+      chgEl.textContent = (chg >= 0 ? "+" : "") + chg.toFixed(2) + "%";
+      chgEl.className = "change-pill " + (chg >= 0 ? "change-up" : "change-down");
+    }
+  } catch (err) {
+    console.error("Panel " + id + " load error:", err);
+  } finally {
+    if (loadingEl) loadingEl.style.display = "none";
+  }
+}
+
+// ===== LOAD ALL PANELS IN PARALLEL =====
+async function refreshAllPanels() {
+  const ids = Object.keys(chartPanels).map(Number);
+  if (ids.length === 0) return;
+  await Promise.all(ids.map(id => loadPanel(id)));
+}
+
+// ===== AUTO-REFRESH =====
+function toggleAutoRefresh() {
+  if (autoRefreshTimer) { clearInterval(autoRefreshTimer); autoRefreshTimer = null; }
+  const ms = parseInt(document.getElementById("g-refresh").value, 10);
+  if (ms > 0) {
+    autoRefreshTimer = setInterval(refreshAllPanels, ms);
+  }
+}
+
+// ===== TECHNICAL INDICATORS =====
 
 // ===== TECHNICAL INDICATORS =====
 function calcRSI(closes, period = 14) {
@@ -606,71 +682,8 @@ function calcMACD(closes, times) {
   return { macd, signal: sig, histogram: hist };
 }
 
-// ===== MULTI-ASSET COMPARE =====
-async function loadMultiCompare() {
-  if (!multiChart) initMultiChart();
-  Object.values(multiSeries).forEach(s => { try { multiChart.removeSeries(s); } catch(e){} });
-  multiSeries = {};
-
-  const assets = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"];
-  const colors = ["#38bdf8", "#22c55e", "#a78bfa", "#eab308"];
-  const allData = {};
-
-  for (const sym of assets) {
-    try {
-      const klines = await getLiveKlines(sym, currentTimeframe, 100);
-      allData[sym] = klines;
-    } catch(e) { console.error(e); }
-  }
-
-  // Normalize to % change from first close
-  const allTimes = [...new Set(Object.values(allData).flatMap(k => k.map(c => c.time)))].sort((a,b) => a - b);
-
-  assets.forEach((sym, idx) => {
-    if (!allData[sym]) return;
-    const firstClose = allData[sym][0].close;
-    const series = multiChart.addLineSeries({ color: colors[idx], lineWidth: 2, title: ASSET_NAMES[sym] });
-    series.setData(allData[sym].map(k => ({ time: k.time, value: ((k.close - firstClose) / firstClose * 100) })));
-    multiSeries[sym] = series;
-  });
-
-  multiChart.timeScale().fitContent();
-
-  document.getElementById("compare-selections").innerHTML = assets.map((sym, idx) =>
-    `<span class="flex items-center gap-1 text-xs mono"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${colors[idx]}"></span>${ASSET_NAMES[sym]}</span>`
-  ).join("");
-}
-
-// ===== TIMEFRAME & CONTROLS =====
-function setTimeframe(tf, btn) {
-  currentTimeframe = tf;
-  document.querySelectorAll(".timeframe-btn").forEach(b => b.classList.remove("active"));
-  btn.classList.add("active");
-  loadChartData();
-}
-
-function switchChartType() {
-  const type = document.getElementById("chart-type").value;
-  if (type === "multi") {
-    document.getElementById("single-chart-section").style.display = "none";
-    document.getElementById("multi-chart-section").style.display = "block";
-    loadMultiCompare();
-  } else {
-    document.getElementById("single-chart-section").style.display = "block";
-    document.getElementById("multi-chart-section").style.display = "none";
-    loadChartData();
-  }
-}
-
-function toggleAutoRefresh() {
-  if (autoRefreshInterval) { clearInterval(autoRefreshInterval); autoRefreshInterval = null; }
-  if (document.getElementById("auto-refresh").checked) {
-    autoRefreshInterval = setInterval(loadChartData, 30000);
-  }
-}
-
 // ===== DEMO DATA (for non-chart pages) =====
-const ASSETS = [
+const DEMO_ASSETS = [
   {rank:1,symbol:"BTC",name:"Bitcoin",price:67432.18,change24h:2.34,mcap:1324,vol:28.5,fund:92,tech:78,whale:85,deriv:71,composite:82,direction:"LONG",confidence:87,risk:"low"},
   {rank:2,symbol:"SOL",name:"Solana",price:178.92,change24h:5.67,mcap:78,vol:3.2,fund:82,tech:88,whale:75,deriv:72,composite:81,direction:"LONG",confidence:85,risk:"medium"},
   {rank:3,symbol:"ETH",name:"Ethereum",price:3521.45,change24h:1.87,mcap:423,vol:15.2,fund:88,tech:72,whale:80,deriv:68,composite:78,direction:"LONG",confidence:82,risk:"low"},
@@ -760,16 +773,16 @@ function scBarHTML(score,color){return`<div class="score-bar"><div class="score-
 
 // ===== RENDER =====
 function renderDashboard(){
-  const avgF=Math.round(ASSETS.reduce((s,a)=>s+a.fund,0)/ASSETS.length);
-  const avgT=Math.round(ASSETS.reduce((s,a)=>s+a.tech,0)/ASSETS.length);
-  const avgW=Math.round(ASSETS.reduce((s,a)=>s+a.whale,0)/ASSETS.length);
-  const avgD=Math.round(ASSETS.reduce((s,a)=>s+a.deriv,0)/ASSETS.length);
+  const avgF=Math.round(DEMO_ASSETS.reduce((s,a)=>s+a.fund,0)/DEMO_ASSETS.length);
+  const avgT=Math.round(DEMO_ASSETS.reduce((s,a)=>s+a.tech,0)/DEMO_ASSETS.length);
+  const avgW=Math.round(DEMO_ASSETS.reduce((s,a)=>s+a.whale,0)/DEMO_ASSETS.length);
+  const avgD=Math.round(DEMO_ASSETS.reduce((s,a)=>s+a.deriv,0)/DEMO_ASSETS.length);
   document.getElementById("score-cards").innerHTML=[
     {l:"Fundamental",s:avgF,i:"📈",c:"var(--blue)"},{l:"Technical",s:avgT,i:"📊",c:"var(--purple)"},
     {l:"Whale Activity",s:avgW,i:"🐋",c:"var(--green)"},{l:"Derivatives",s:avgD,i:"📉",c:"var(--yellow)"}
   ].map(c=>`<div class="card"><div class="flex justify-between items-center mb-2"><span class="text-xs t-gray uppercase tracking-wider">${c.l}</span><span>${c.i}</span></div><div class="text-2xl font-bold mono" style="color:${c.c}">${c.s}</div>${scBarHTML(c.s,c.c)}<div class="text-xs t-gray mt-2">Average Score</div></div>`).join("");
 
-  document.querySelector("#top-table tbody").innerHTML=ASSETS.slice(0,10).map(a=>`<tr><td class="t-gray">${a.rank}</td><td><span class="font-bold mono">${a.symbol}</span> <span class="text-xs t-gray">${a.name}</span></td><td class="text-right mono">${fmt$(a.price)}</td><td class="text-right mono ${chgClass(a.change24h)}">${a.change24h>=0?"+":""}${a.change24h}%</td><td class="text-right mono" style="color:${scoreColor(a.composite)}">${a.composite}</td><td class="text-center"><span class="${dirBadge(a.direction)}">${a.direction}</span></td><td class="text-right mono t-gray">${a.confidence}%</td><td><span class="risk-tag ${riskClass(a.risk)}">${a.risk}</span></td></tr>`).join("");
+  document.querySelector("#top-table tbody").innerHTML=DEMO_ASSETS.slice(0,10).map(a=>`<tr><td class="t-gray">${a.rank}</td><td><span class="font-bold mono">${a.symbol}</span> <span class="text-xs t-gray">${a.name}</span></td><td class="text-right mono">${fmt$(a.price)}</td><td class="text-right mono ${chgClass(a.change24h)}">${a.change24h>=0?"+":""}${a.change24h}%</td><td class="text-right mono" style="color:${scoreColor(a.composite)}">${a.composite}</td><td class="text-center"><span class="${dirBadge(a.direction)}">${a.direction}</span></td><td class="text-right mono t-gray">${a.confidence}%</td><td><span class="risk-tag ${riskClass(a.risk)}">${a.risk}</span></td></tr>`).join("");
 
   document.getElementById("whale-feed").innerHTML=WHALES.map(w=>`<div class="flex justify-between items-center py-2" style="border-bottom:1px solid var(--border)"><div class="flex items-center gap-2"><span class="dot ${w.sent==='bullish'?'dot-green':w.sent==='bearish'?'dot-red':'bg-gray'}" style="width:6px;height:6px"></span><span class="mono font-bold text-sm">${w.asset}</span><span class="text-xs t-gray">${w.type.replace(/_/g," ")}</span></div><div class="text-right"><span class="mono text-sm">${w.amount}</span><span class="text-xs t-gray ml-2">${w.time}</span></div></div>`).join("");
 
@@ -783,7 +796,7 @@ function renderScreener(){
   const dir=document.getElementById("filter-dir").value;
   const minS=parseFloat(document.getElementById("filter-score").value)||0;
   const search=document.getElementById("filter-search").value.toLowerCase();
-  let f=ASSETS;
+  let f=DEMO_ASSETS;
   if(dir)f=f.filter(a=>a.direction===dir);
   if(minS)f=f.filter(a=>a.composite>=minS);
   if(search)f=f.filter(a=>a.symbol.toLowerCase().includes(search)||a.name.toLowerCase().includes(search));
@@ -823,7 +836,7 @@ function showPage(id,el){
   document.querySelectorAll(".sidebar nav a").forEach(a=>a.classList.remove("active"));
   if(el)el.classList.add("active");
   document.getElementById("sidebar").classList.remove("open");
-  if(id==="charts"){setTimeout(()=>loadChartData(),100);}
+  if(id==="charts"){setTimeout(()=>{if(Object.keys(chartPanels).length===0){setLayout(1,document.querySelector('.layout-btn[data-layout="1"]'));}else{refreshAllPanels();}},100);}
 }
 
 // ===== INIT =====
